@@ -1,0 +1,256 @@
+version: 2.1
+description: |
+  Use CircleCI to push code to Pantheon Dev and Multidev Environments.
+display:
+  source_url: https://github.com/pantheon-systems/circleci-orb
+  home_url: https://pantheon.io/
+executors:
+  default:
+    description: "Default executor to use when running this orb's jobs"
+    parameters:
+      resource_class:
+        type: string
+        default: "medium"
+    docker:
+      - image: quay.io/pantheon-public/build-tools-ci:6.x
+    resource_class: <<parameters.resource_class>>
+jobs:
+  push:
+    working_directory: ~/sitedir
+    environment:
+      TZ: "/usr/share/zoneinfo/America/New_York"
+      # @todo, remove this variable https://github.com/pantheon-systems/circleci-orb/issues/7
+      BUILD_TOOLS_VERSION: dev-option-for-no-force
+      TERM: dumb
+      PANTHEON_REPO_DIR: "/tmp/pantheon_repo"
+    parameters:
+      resource_class:
+        description: "Override the resource class used by the job"
+        default: "medium"
+        type: string
+      directory_to_push:
+        description: "The directory within the repository to push to Pantheon. Defaults to the git root: '.' Use this setting if you have a more complex repo structure that puts your Pantheon root in a deeper directory. For instance, if you are using a monorepo to manage a backend CMS on Pantheon and a decoupled frontend deployed elsewhere, set this param to the name of the directory that holds your `pantheon.yml` file."
+        default: "."
+        type: string
+      checkout:
+        description: "Should this job checkout your repository as the first step? Set to false if you are calling 'checkout' in 'pre-steps'"
+        default: true
+        type: boolean
+      set_env_vars:
+        description: "Should this job run a script to set env vars like TERMINUS_ENV? Set to false if you set variables in 'pre-steps'"
+        default: true
+        type: boolean
+      env_create_max_time:
+        description: "The maximum amount of time to wait for Pantheon environment creation (terminus -n build:env:create). This parameter maps to CircleCI's native 'no_output_timeout' option."
+        default: "10m"
+        type: string
+      terminus_clone_env:
+        description: "The source environment from which the database and uploaded files are cloned."
+        default: "live"
+        type: string
+      clone_content:
+        description: "Determines whether or not every build will re-clone content from the environment set in terminus_clone_env. Set to false if cloning the database and files means builds are taking too long."
+        default: true
+        type: boolean
+
+    executor:
+      name: default
+      resource_class: <<parameters.resource_class>>
+
+    steps:
+      - when:
+          condition: <<parameters.checkout>>
+          steps:
+            - checkout
+
+      # Set environment variables by calling a script from the container.
+      # https://github.com/pantheon-systems/docker-build-tools-ci/blob/5.x/scripts/set-environment
+      # Perhaps the most important variable here is TERMINUS_ENV which
+      # determines which Pantheon environment is targeted.
+      # When on the master branch in GitHub, the target environment on Pantheon
+      # will be Dev.
+      # If the current commit is part of a pull request, the target environment
+      # will be the Multidev environment pr-$CI_PULL_REQUEST
+      # In all other cases a new Pantheon multidev will be created specifically
+      # for this build number, ci-$CIRCLE_BUILD_NUM.
+      - when:
+          condition: <<parameters.set_env_vars>>
+          steps:
+            - run:
+                name: Derive additional environment variables
+                command: /build-tools-ci/scripts/set-environment
+
+      # Later commands require being signed in to Pantheon.
+      - run:
+          name: Authenticate with Pantheon's CLI using a machine token
+          command: terminus -n auth:login --machine-token="$TERMINUS_TOKEN"
+
+      # This section is a convoluted way of ensure that there are not git
+      # conflicts when pushing to Pantheon.
+      # Rather than pushing the history from GitHub/BitBucket to Pantheon,
+      # the Pantheon history is cloned to a tmp directory, changes are copied
+      # (rsync) to the Pantheon repo to be committed on top of history that can
+      # then push with no chance of a merge conflict (other than a race
+      # condition caused by a push going to Pantheon from elsewhere)
+      - restore_cache:
+            keys:
+              - pantheon-repo-{{ .Branch }}
+              - pantheon-repo-
+      - run:
+          name: Checkout site repository from Pantheon
+          command: |
+            # Ensure that there's a Pantheon repo locally. If one was not
+            # restored from cache, clone it fresh.
+            if [ ! -d "$PANTHEON_REPO_DIR/.git" ]; then
+              mkdir $PANTHEON_REPO_DIR
+              cd $PANTHEON_REPO_DIR
+              git init
+              git remote add pantheon $(terminus connection:info $TERMINUS_SITE.dev --field=git_url)
+              git remote -v
+            fi
+
+            git fetch pantheon
+            
+            # If the current branch is on Pantheon, check it out.
+            # If it is not, checkout master and then make a new branch.
+            if git ls-remote pantheon | grep "refs/heads/$TERMINUS_ENV$" > /dev/null; then
+              git checkout $TERMINUS_ENV
+              git pull
+            else
+              git checkout master
+              git pull
+              git checkout -b $TERMINUS_ENV
+            fi
+
+      - save_cache:
+          key: pantheon-repo-{{ .Branch }}
+          paths:
+            - $PANTHEON_REPO_DIR
+
+      # terminus build:env:delete can take around a minute.
+      # So only run it when the current build needs to
+      # make a new Multidev environment.
+      - run:
+          name: Delete old Multidevs if this build needs to create a new one
+          command: |
+            if [[ $TERMINUS_ENV = ci-* || $TERMINUS_ENV = pr-*   ]]
+            then
+                echo "May need to delete old ci- or pr- environments to make room for this one"
+                echo "Getting list of all environments"
+                export ENV_LIST=$(terminus env:list $TERMINUS_SITE --field=id)
+                echo "Checking if current environment is in list of existing environments"
+                if [[ $(echo "${ENV_LIST}" | grep -x ${TERMINUS_ENV})  ]]
+                then
+                    echo "${TERMINUS_ENV} found in the list of environments"
+                    exit 0
+                else
+                    echo "${TERMINUS_ENV} not found in the list of environments."
+                    echo "Running clean-up script to delete old pr- environments"
+                    terminus -n build:env:delete:pr "$TERMINUS_SITE" --yes
+                    if [[ $TERMINUS_ENV = ci-*  ]]
+                    then
+                        echo "Running clean-up script to delete old ci- environments"
+                        terminus -n build:env:delete:ci "$TERMINUS_SITE" --keep=2 --yes
+                    else
+                        echo "Skipping deletion of ci- envs"
+                    fi
+                fi
+            fi
+
+      - run:
+          name: Copy code to the local clone of the Pantheon repository
+          command: |
+              rsync -av --exclude='.git'  << parameters.directory_to_push >>/ $PANTHEON_REPO_DIR  --delete
+              # For easier debugging, show what files have changed.
+              git -C $PANTHEON_REPO_DIR status
+
+      - run:
+          name: Commit code to Pantheon repository and push to Pantheon
+          no_output_timeout: <<parameters.env_create_max_time>>
+          command: |
+              export COMMIT_MSG=$(git log -1 --pretty=%B)
+              cd $PANTHEON_REPO_DIR
+              if [ "true" = "<<parameters.clone_content>>" ] ; then
+                export CLONE_CONTENT="--clone-content"
+              else
+                export CLONE_CONTENT=""
+              fi
+              # This command will commit any changed files and push to Pantheon.
+              # New multidevs will be created as necessary.
+              terminus -n build:env:create "$TERMINUS_SITE.<< parameters.terminus_clone_env >>" "$TERMINUS_ENV" --yes $CLONE_CONTENT --message="CI: $COMMIT_MSG"
+      # @todo, Check back with CircleCI DevRel team. They mentioned possibly
+      # adding a CircleCI-maintained Orb step to do this concept.
+      - run:
+          name: Copy environment variables to persist to workspace for use in subsequent jobs.
+          command: cp $BASH_ENV bash_env.txt
+      - persist_to_workspace:
+          root: .
+          paths:
+            - bash_env.txt
+examples:
+  just_push:
+    description: |
+      The simplest example of using this Orb.
+    usage:
+      version: 2.1
+      workflows:
+        version: 2
+        just_push:
+          jobs:
+            - pantheon/push
+      orbs:
+        pantheon: pantheon-systems/pantheon@0.1.0
+
+  compile_sass_and_push:
+    description: |
+      Compile Sass in a separate job before pushing to Pantheon. See this example in use at https://github.com/stevector/wordpress-orb-demo
+    usage:
+      # See this example in use at https://github.com/stevector/wordpress-orb-demo
+      version: 2.1
+      workflows:
+        version: 2
+        compile_sass_and_push:
+          jobs:
+          - npmbuild_and_persist
+          - pantheon/push:
+              # This "requires" section tells CircleCI the order in which
+              # jobs must be run.
+              requires:
+                - npmbuild_and_persist
+              checkout: false
+              pre-steps:
+                - checkout
+                # Attach this dist directory created in npmbuild_and_persist
+                # which contains the compiled css.
+                - attach_workspace:
+                    at: .
+                # The dist directory that holds the compiled Sass is git ignored.
+                # It needs to be committed on Pantheon.
+                # Removing this .gitignore file makes it available for committing.
+                # Pantheon's Composer examples use a more complicated
+                # technique of "cutting" the top level .gitignore
+                # file so that lines specifying build artifact directories are removed.
+                # https://github.com/pantheon-systems/example-drops-8-composer/blob/670ae310c601dabbb7b35411ff3e08e4b1fac7a3/composer.json#L67
+                - run: rm wp-content/themes/may2019/.gitignore
+      orbs:
+        pantheon: pantheon-systems/pantheon@0.2.0
+      jobs:
+        # This job compiles Sass and then saves (persists) the directory
+        # containing the compiled css for reuse in the pantheon/push job.
+        npmbuild_and_persist:
+          docker:
+          - image: node:10.15.3
+          steps:
+          - checkout
+          - run:
+              name: install npm dependencies in a custom WordPress child theme
+              command: cd wp-content/themes/may2019 && npm ci
+          - run:
+              name: Compile Sass
+              command: cd wp-content/themes/may2019 && npm run build
+          - persist_to_workspace:
+              root: .
+              paths:
+              - wp-content/themes/may2019/dist
+
+
