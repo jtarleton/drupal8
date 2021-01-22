@@ -1,76 +1,9 @@
-# PHP CircleCI 2.1 configuration file
-#
-# Check https://circleci.com/docs/2.1/language-php/ for more details
-#
 version: 2.1
-
-orbs:
-  orb-tools: circleci/orb-tools@8.5.0
-
-workflows:
-  publish-dev:
-    jobs:
-      - orb-tools/publish-dev:
-          pre-steps:
-            - checkout
-            - run: circleci orb process ./.circleci/src/@orb.yml
-          # pre steps to validate
-          alpha-version-ref: 'dev:$CIRCLE_BRANCH'
-          orb-name: pantheon-systems/pantheon
-          orb-path: './.circleci/src/@orb.yml'
-      # @todo, add integration tests.
-      # See https://github.com/pantheon-systems/circleci-orb/issues/2
-  publish:
-      jobs:
-        build:
-          docker:
-        # Specify the version you desire here
-       # - image: circleci/php:7.1-node-browsers
-            - image: circleci/php:7.4
-            - image: drupal:8.9.13-apache-buster
-        # Specify service dependencies here if necessary
-        # CircleCI maintains a library of pre-built images
-        # documented at https://circleci.com/docs/2.0/circleci-images/
-        # Using the RAM variation mitigates I/O contention
-        # for database intensive operations.
-        # - image: circleci/mysql:5.7-ram
-        #
-        # - image: redis:2.8.19
-
-      steps:
-        - checkout
-
-        - run: sudo apt update 
-        - run: sudo apt-get update
-        - run: sudo apt-get upgrade
-        - run: sudo apt-get install -f libpng-dev
-        - run: sudo apt-get install -y libfreetype6-dev libjpeg62-turbo-dev  
-
-
-
-
-
-
-
-
-
-
-
-      # restore_cache:     
-      #    keys:
-      #      - node-v1-{{ checksum "package.json" }}
-      #      - node-v1-
-      # run: yarn install
-      # save_cache:
-      #    key: node-v1-{{ checksum "package.json" }}
-      #    paths:
-      #      - node_modules
-
-      # prepare the database
-      #- run: touch storage/testing.sqlite
-      #- run: php artisan migrate --env=testing --database=sqlite_testing --force
-
-      # run tests with phpunit or codecept
-      #- run: ./vendor/bin/phpunit
-      #- run: ./vendor/bin/codecept build
-      #- run: ./vendor/bin/codecept run
+jobs:
+  build:
+    docker:
+      - image: circleci/php:7.4
+      - image: drupal:8.9.13-apache-buster
+    steps:
+      - checkout
+      - run: echo "this is the build job"
