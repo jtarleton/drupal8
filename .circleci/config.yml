@@ -29,8 +29,8 @@ jobs:
       
       # PHP CircleCI 2.0 Configuration File# PHP CircleCI 2.0 Configuration File sudo apt install zlib1g-dev libsqlite3-dev
       - run: sudo docker-php-ext-install gd
-      - run: sudo mkdir storage
-      - run: sudo touch storage/testing.sqlite
+      - run: mkdir storage
+      - run: touch storage/testing.sqlite
       # Download and cache dependencies
       - restore_cache:
           keys:
