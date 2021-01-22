@@ -9,7 +9,7 @@ jobs:
       # Specify the version you desire here
      # - image: circleci/php:7.1-node-browsers
       - image: circleci/php
-      - image: drupal/drupal:8.9-apache-buster
+      - image: drupal:8.9-apache-buster
       # Specify service dependencies here if necessary
       # CircleCI maintains a library of pre-built images
       # documented at https://circleci.com/docs/2.0/circleci-images/
