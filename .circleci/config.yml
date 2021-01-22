@@ -13,7 +13,7 @@ workflows:
       - orb-tools/publish-dev:
           pre-steps:
             - checkout
-            - run: circleci orb process src/@orb.yml
+            - run: circleci orb process ./.circleci/src/@orb.yml
           # pre steps to validate
           alpha-version-ref: 'dev:$CIRCLE_BRANCH'
           orb-name: pantheon-systems/pantheon
