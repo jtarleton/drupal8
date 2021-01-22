@@ -26,7 +26,7 @@ jobs:
       - run: sudo apt-get upgrade
       - run: sudo apt-get install -f libpng-dev
       - run: sudo apt-get install -y libfreetype6-dev libjpeg62-turbo-dev
-      - run: sudo apt-get docker-php-ext-install zip
+      
       # PHP CircleCI 2.0 Configuration File# PHP CircleCI 2.0 Configuration File sudo apt install zlib1g-dev libsqlite3-dev
       - run: sudo docker-php-ext-install gd
       # Download and cache dependencies
