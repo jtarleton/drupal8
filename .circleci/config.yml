@@ -17,10 +17,34 @@ workflows:
           # pre steps to validate
           alpha-version-ref: 'dev:$CIRCLE_BRANCH'
           orb-name: pantheon-systems/pantheon
-          orb-path: 'src/@orb.yml'
+          orb-path: './.circleci/src/@orb.yml'
       # @todo, add integration tests.
       # See https://github.com/pantheon-systems/circleci-orb/issues/2
-  
+  publish:
+      jobs:
+        build:
+          docker:
+        # Specify the version you desire here
+       # - image: circleci/php:7.1-node-browsers
+            - image: circleci/php:7.4
+            - image: drupal:8.9.13-apache-buster
+        # Specify service dependencies here if necessary
+        # CircleCI maintains a library of pre-built images
+        # documented at https://circleci.com/docs/2.0/circleci-images/
+        # Using the RAM variation mitigates I/O contention
+        # for database intensive operations.
+        # - image: circleci/mysql:5.7-ram
+        #
+        # - image: redis:2.8.19
+
+      steps:
+        - checkout
+
+        - run: sudo apt update 
+        - run: sudo apt-get update
+        - run: sudo apt-get upgrade
+        - run: sudo apt-get install -f libpng-dev
+        - run: sudo apt-get install -y libfreetype6-dev libjpeg62-turbo-dev  
 
 
 
