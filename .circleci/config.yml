@@ -1,15 +1,33 @@
-# PHP CircleCI 2.0 configuration file
+# PHP CircleCI 2.1 configuration file
 #
-# Check https://circleci.com/docs/2.0/language-php/ for more details
+# Check https://circleci.com/docs/2.1/language-php/ for more details
 #
-version: 2
-jobs:
-  build:
-    docker:
+version: 2.1
+
+orbs:
+  orb-tools: circleci/orb-tools@8.5.0
+
+workflows:
+  publish-dev:
+    jobs:
+      - orb-tools/publish-dev:
+          pre-steps:
+            - checkout
+            - run: circleci orb process src/@orb.yml
+          # pre steps to validate
+          alpha-version-ref: 'dev:$CIRCLE_BRANCH'
+          orb-name: pantheon-systems/pantheon
+          orb-path: 'src/@orb.yml'
+      # @todo, add integration tests.
+      # See https://github.com/pantheon-systems/circleci-orb/issues/2
+  publish:
+    jobs:
+      build:
+        docker:
       # Specify the version you desire here
      # - image: circleci/php:7.1-node-browsers
-      - image: circleci/php:7.4
-      - image: drupal:8.9.13-apache-buster
+          - image: circleci/php:7.4
+          - image: drupal:8.9.13-apache-buster
       # Specify service dependencies here if necessary
       # CircleCI maintains a library of pre-built images
       # documented at https://circleci.com/docs/2.0/circleci-images/
@@ -19,33 +37,69 @@ jobs:
       #
       # - image: redis:2.8.19
 
-    steps:
-      - checkout
+      steps:
+        - checkout
 
-      - run: sudo apt update 
-      - run: sudo apt-get update
-      - run: sudo apt-get upgrade
-      - run: sudo apt-get install -f libpng-dev
-      - run: sudo apt-get install -y libfreetype6-dev libjpeg62-turbo-dev
+        - run: sudo apt update 
+        - run: sudo apt-get update
+        - run: sudo apt-get upgrade
+        - run: sudo apt-get install -f libpng-dev
+        - run: sudo apt-get install -y libfreetype6-dev libjpeg62-turbo-dev
       
       # PHP CircleCI 2.0 Configuration File# PHP CircleCI 2.0 Configuration File sudo apt install zlib1g-dev libsqlite3-dev
-      - run: sudo docker-php-ext-install gd
-      - run: mkdir storage
-      - run: touch storage/testing.sqlite
+        - run: sudo docker-php-ext-install gd
+        - run: mkdir storage
+        - run: touch storage/testing.sqlite
       # Download and cache dependencies
-      - restore_cache:
-          keys:
+        - restore_cache:
+            keys:
             # "composer.lock" can be used if it is committed to the repo
-            - v1-dependencies-{{ checksum "composer.json" }}
+              - v1-dependencies-{{ checksum "composer.json" }}
             # fallback to using the latest cache if no exact match is found
-            - v1-dependencies-
+              - v1-dependencies-
 
-      - run: composer install -n --prefer-dist
+        - run: composer install -n --prefer-dist
 
-      - save_cache:
-          key: v1-dependencies-{{ checksum "composer.json" }}
-          paths:
+        - save_cache:
+            key: v1-dependencies-{{ checksum "composer.json" }}
+            paths:
             - ./vendor
+    
+    
+    
+      # CircleCI recommends a more complex workflow for promoting
+      # dev Orbs instead of directly creating tags.
+      # It might be worthwhile to switch to that workflow eventually.
+      # @See https://github.com/pantheon-systems/circleci-orb/issues/20
+      # For the time being, I (Steve Persch) would prefer to make tags
+      # using the GitHub UI and let this step publish an Orb version with
+      # the same name as the tag.
+      # Manually creating tags introduces the possibility of making the wrong
+      # tag name. I think that the risk is acceptable for the simpler CI
+      # workflow here.
+      - orb-tools/publish:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /.*/
+          pre-steps:
+            - checkout
+            - run: circleci orb process src/@orb.yml
+          orb-ref: 'pantheon-systems/pantheon@$CIRCLE_TAG'
+          orb-path: 'src/@orb.yml'
+
+
+
+
+
+
+
+
+
+
+
+
       # restore_cache:     
       #    keys:
       #      - node-v1-{{ checksum "package.json" }}
